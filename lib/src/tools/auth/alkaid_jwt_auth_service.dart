@@ -5,7 +5,7 @@ import 'package:crypto/crypto.dart';
 import '../../../alkaid.dart';
 import 'auth_options.dart';
 import 'auth_strategy.dart';
-import 'auth_token.dart';
+import 'auth_jwt_token.dart';
 
 ///JWT用户认证服务
 class AlkaidJWTAuthService<User> extends AlkaidInternalService {
@@ -13,6 +13,7 @@ class AlkaidJWTAuthService<User> extends AlkaidInternalService {
   final Random _random = Random();
   final RegExp _rgxBearer = RegExp(r'^Bearer');
 
+  //hmac的密钥应该定期更换
   late final Hmac _hs256;
   //允许在cookie 中添加token:Bearer xxx
   //允许jwt储存在token中
@@ -23,6 +24,8 @@ class AlkaidJWTAuthService<User> extends AlkaidInternalService {
   final String? cookieDomain;
   final String cookiePath;
   final bool enforceIp;
+  final bool addCookieExpires;
+  //jwtLifeSpan 应该确保 <= sessionTimeout
   late final int _jwtLifeSpan;
   //存储认证策略
   Map<String,AuthStrategy<User>> strategies = {};
@@ -40,13 +43,22 @@ class AlkaidJWTAuthService<User> extends AlkaidInternalService {
     this.cookieDomain,
     this.cookiePath = '/',
     this.secureCookies = true,
+    this.addCookieExpires = true,
+    int? jwtLifeSpan
   }) {
     _hs256 = Hmac(sha256, (jwtKey ?? _randomString(32)).codeUnits);
-    _jwtLifeSpan = AlkaidServer.getServer().sessionTimeout;
+    if(jwtLifeSpan != null) {
+      _jwtLifeSpan = jwtLifeSpan;
+    } else {
+      //默认与sessionTimeout生命周期相同
+      _jwtLifeSpan = AlkaidServer.getServer().sessionTimeout;
+    }
   }
 
 
 
+  //获取请求中的jwt token,如果反序列化成功，则返回user,token
+  //如果没有token,则抛出401
   @override
   Future<Map<String,dynamic>> accept(HttpRequest request, HttpResponse response) {
     try {
@@ -58,7 +70,7 @@ class AlkaidJWTAuthService<User> extends AlkaidInternalService {
 
   @override
   FutureOr close() {
-
+    strategies.clear();
   }
 
 
@@ -70,7 +82,7 @@ class AlkaidJWTAuthService<User> extends AlkaidInternalService {
       throw AlkaidHttpException.forbidden(message: 'No JWT provided');
     }
     try {
-      var token = AuthToken.validate(jwt, _hs256);
+      var token = AuthJWTToken.validate(jwt, _hs256);
       if(enforceIp && request.connectionInfo?.remoteAddress.address != token.ipAddress) {
         throw AlkaidHttpException.forbidden(message: 'JWT cannot be accessed from this IP address.');
       }
@@ -112,7 +124,7 @@ class AlkaidJWTAuthService<User> extends AlkaidInternalService {
         var user = await strategy.authenticate(request, response);
         if(user != null) {
           var userId = await serializer(user);
-          AuthToken authToken = AuthToken(userId: userId,
+          AuthJWTToken authToken = AuthJWTToken(userId: userId,
               lifeSpan: _jwtLifeSpan,ipAddress: request.connectionInfo?.remoteAddress.address,
               issuedAt: DateTime.now());
           if(options != null && options.authTokenCallback != null) {
@@ -177,7 +189,24 @@ class AlkaidJWTAuthService<User> extends AlkaidInternalService {
   }
 
   void _addProtectedCookie(HttpResponse response,String name,String value) {
-    response.cookies.add(Cookie(name, value));
+    //cookie中的jwt是否需要添加过期时间?
+    Cookie cookie = Cookie(name, value);
+    cookie
+      ..path = cookiePath
+      ..domain = cookieDomain;
+
+    if(secureCookies) {
+      cookie.httpOnly = true;
+      if(AlkaidServer.getServer().hasSecure) {
+        cookie.secure = true;
+      }
+    }
+
+    if(addCookieExpires) {
+      cookie.expires = DateTime.now().add(Duration(seconds: _jwtLifeSpan));
+      cookie.maxAge = _jwtLifeSpan;
+    }
+    response.cookies.add(cookie);
   }
 
   String _randomString(int n) {

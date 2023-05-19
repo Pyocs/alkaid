@@ -2,8 +2,8 @@ import 'dart:io';
 import 'package:alkaid/src/service/alkaid_service_manager.dart';
 import 'package:file/local.dart';
 import 'package:io/ansi.dart';
-
 import '../exception/alkaid_server_exception.dart';
+import '../inject/alkaid_inject.dart';
 import '../modules/driver/alkaid_logging.dart';
 import '../modules/driver/driver_http_module.dart';
 import '../modules/driver/http_module_chain.dart';
@@ -17,25 +17,30 @@ class AlkaidServer {
   late final int _sessionTimeout;
 
   late final HttpServer _httpServer;
-
-  late final AlkaidLogging alkaidLogging;
-
-  final HttpModuleChain httpModuleChain = HttpModuleChain();
-
-  final ModulesCollection modulesCollection = ModulesCollection();
-
-  late final  RouterHttpModule routerHttpModule;
-
-  late final StaticHttpModule staticHttpModule;
-
-  late final DriverHttpModule driverHttpModule;
-
-  late final AlkaidServiceManager alkaidServiceManager;
+  //日志
+  late final AlkaidLogging _alkaidLogging;
+  //模块链
+  late final HttpModuleChain _httpModuleChain;
+  //事件总线
+  late final ModulesCollection _modulesCollection;
+  //路由模块
+  late final  RouterHttpModule _routerHttpModule;
+  //静态资源模块
+  late final StaticHttpModule _staticHttpModule;
+  late final DriverHttpModule _driverHttpModule;
+  //服务管理器
+  late final AlkaidServiceManager _alkaidServiceManager;
 
   late final bool _hasSecure;
 
   int get sessionTimeout => _sessionTimeout;
+  HttpModuleChain get httpModuleChain => _httpModuleChain;
+  ModulesCollection get modulesCollection => _modulesCollection;
+  RouterHttpModule get routerHttpModule => _routerHttpModule;
+  StaticHttpModule get staticHttpModule => _staticHttpModule;
+  AlkaidServiceManager get alkaidServiceManager => _alkaidServiceManager;
 
+  bool get hasSecure => _hasSecure;
   AlkaidServer._();
 
   static Future<AlkaidServer> server(dynamic address,int port,{bool shared = false,int? sessionTimeout}) async {
@@ -64,12 +69,14 @@ class AlkaidServer {
 
   void _init() {
     _alkaidServer = this;
-    alkaidLogging = AlkaidLogging();
-    routerHttpModule = RouterHttpModule('router',weight: 5);
-    staticHttpModule = StaticHttpModule(LocalFileSystem(), 'web', 'static',weight: 4);
-    httpModuleChain.addAll([routerHttpModule,staticHttpModule]);
-    driverHttpModule = DriverHttpModule(httpModuleChain, modulesCollection, alkaidLogging);
-    alkaidServiceManager = AlkaidServiceManager(routerHttpModule);
+    _alkaidLogging = AlkaidLogging();
+    _modulesCollection = ModulesCollection();
+    _httpModuleChain = HttpModuleChain();
+    _routerHttpModule = RouterHttpModule('router',weight: 5);
+    _staticHttpModule = StaticHttpModule(LocalFileSystem(), 'web', 'static',weight: 4);
+    _httpModuleChain.addAll([_routerHttpModule,_staticHttpModule]);
+    _driverHttpModule = DriverHttpModule(_httpModuleChain, _modulesCollection, _alkaidLogging);
+    _alkaidServiceManager = AlkaidServiceManager(_routerHttpModule);
   }
 
 
@@ -89,10 +96,10 @@ class AlkaidServer {
 
     //反射注入
     _init();
-    // await AlkaidInject(routerHttpModules).start();
+    await AlkaidInject(_routerHttpModule).start();
 
     _httpServer.listen((HttpRequest request) {
-      driverHttpModule.handler(request, request.response);
+      _driverHttpModule.handler(request, request.response);
     });
     _httpServer.defaultResponseHeaders.add('Server', 'Alkaid');
     print(yellow.wrap('listen:  ${_hasSecure ? "https:" : "http:"}${_httpServer.address.host}:${_httpServer.port}'));
@@ -100,8 +107,8 @@ class AlkaidServer {
 
   void close() async {
     _httpServer.close();
-    modulesCollection.close();
-    alkaidLogging.close();
+    _modulesCollection.close();
+    _alkaidLogging.close();
   }
 
   ///获取Server

@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'auth_token.dart';
+import 'auth_jwt_token.dart';
 
 ///生成token回调函数
 typedef AuthCallback = FutureOr Function(HttpRequest request,HttpResponse response,String token);
 
 ///生成AuthToken回调函数
 ///默认返回null
-typedef AuthTokenCallback<User> = FutureOr Function(HttpRequest request,HttpResponse response,AuthToken authToken,User user);
+typedef AuthTokenCallback<User> = FutureOr Function(HttpRequest request,HttpResponse response,AuthJWTToken authToken,User user);
 
 class AuthOptions<User> {
   AuthCallback? authCallback;

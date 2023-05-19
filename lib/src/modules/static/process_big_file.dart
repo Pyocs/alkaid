@@ -10,7 +10,7 @@ Future<void> readFileInChucks(HttpResponse response,File file) async {
   final fileSize = await  file.length();
   response.headers.set('Content-Length', fileSize.toString());
 
-  final controller = StreamController<List<int>>();
+  // final controller = StreamController<List<int>>();
   // final stream = controller.stream;
 
   try {

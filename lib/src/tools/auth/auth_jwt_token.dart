@@ -56,7 +56,7 @@ String decodeBase64(String str) {
   return utf8.decode(base64Url.decode(output));
 }
 
-class AuthToken {
+class AuthJWTToken {
   //jwt头部信息
   final SplayTreeMap<String,String> _header =
   SplayTreeMap.from({'alg':'HS256','typ':'JWT'});
@@ -72,7 +72,7 @@ class AuthToken {
   //有效负载
   Map<String,dynamic> payload = {};
 
-  AuthToken({
+  AuthJWTToken({
     this.ipAddress,
     this.lifeSpan = -1,
     required this.userId,
@@ -85,10 +85,10 @@ class AuthToken {
     }
   }
 
-  factory AuthToken.fromJson(String msg) => AuthToken.fromMap(json.decode(msg) as Map<String,dynamic>);
+  factory AuthJWTToken.fromJson(String msg) => AuthJWTToken.fromMap(json.decode(msg) as Map<String,dynamic>);
 
-  factory AuthToken.fromMap(Map<String,dynamic> data) {
-    return AuthToken(
+  factory AuthJWTToken.fromMap(Map<String,dynamic> data) {
+    return AuthJWTToken(
         ipAddress: data['aud'].toString(),
         lifeSpan: data['exp'] as num,
         issuedAt: DateTime.parse(data['iat'].toString()),
@@ -97,7 +97,7 @@ class AuthToken {
     );
   }
 
-  factory AuthToken.parse(String jwt) {
+  factory AuthJWTToken.parse(String jwt) {
     var split = jwt.split('.');
 
     if(split.length != 3) {
@@ -105,10 +105,10 @@ class AuthToken {
     }
 
     var payloadString = decodeBase64(split[1]);
-    return AuthToken.fromMap(json.decode(payloadString) as Map<String,dynamic>);
+    return AuthJWTToken.fromMap(json.decode(payloadString) as Map<String,dynamic>);
   }
 
-  factory AuthToken.validate(String jwt,Hmac hmac) {
+  factory AuthJWTToken.validate(String jwt,Hmac hmac) {
     var split = jwt.split('.');
 
     if(split.length != 3) {
@@ -125,7 +125,7 @@ class AuthToken {
     if (signature != split[2]) {
       throw AlkaidHttpException.unauthorized(message: 'JWT payload does not match hashed version');
     }
-    return AuthToken.fromMap(json.decode(payloadString) as Map<String,dynamic>);
+    return AuthJWTToken.fromMap(json.decode(payloadString) as Map<String,dynamic>);
   }
 
   String serialize(Hmac hmac) {
