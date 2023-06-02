@@ -2,8 +2,8 @@ import 'dart:async';
 import 'alkaid_service.dart';
 
 
-class AlkaidListService extends AlkaidExposeService {
-  final List _list = List.empty(growable: true);
+class AlkaidListService<T> extends AlkaidExposeService {
+  final List<T> _list = List<T>.empty(growable: true);
 
   AlkaidListService(super.name, super.expose);
 

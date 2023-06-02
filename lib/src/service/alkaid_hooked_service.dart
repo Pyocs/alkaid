@@ -7,7 +7,7 @@ import '../modules/route/route_meta.dart';
 import 'alkaid_service.dart';
 import 'alkaid_service_manager.dart';
 
-///钩子服务，用于给其他服务添加钩子服务
+///钩子服务，用于代理其他服务
 ///不管服务是否暴露，拦截对accept方法的调用
 ///after  在A服务被执行之后执行B服务
 class AlkaidHookedService extends AlkaidInternalService {

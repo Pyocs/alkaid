@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:logging/logging.dart';
+import '../../core/http_context_meta.dart';
 import '../../exception/alkaid_exception.dart';
 import '../../exception/alkaid_http_exception.dart';
 import '../../exception/alkaid_server_exception.dart';
 import '../../core/modules_collection.dart';
 import '../../status/alkaid_status.dart';
 import '../http_module.dart';
-import 'alkaid_logging.dart';
+import '../../logging/alkaid_logging.dart';
 import 'http_module_chain.dart';
 
 
@@ -22,6 +24,7 @@ import 'http_module_chain.dart';
 ///   如果下一个模块能正常处理请求且返回响应，则返回AlkaidStatus.finish
 ///
 /// AlkaidStatus.stop  表明响应没有直接写入，而是写入了事件总线，且response没有关闭，而由序列化模块从事件总线读取响应并序列化响应、关闭响应
+/// AlkaidStatus.stop会提前结束模块链的循环
 /// AlkaidStatus.wait  该模块展示不能处理该请求，需要其他模块协同才能处理
 ///  *** 这种情况需要其他模块将响应写入事件总线，然后由该模块从事件模块中读取、处理 (实现最难)
 ///
@@ -54,81 +57,64 @@ class DriverHttpModule implements HttpModules {
   }
 
   @override
-  Future handler(HttpRequest request, HttpResponse response) async {
+  void handler(HttpRequest request, HttpResponse response) async {
     //获取第一个处理模块
     HttpModules? httpModules = httpModuleChain.get(-1, '');
     if(httpModules == null) {
       response.write(AlkaidHttpException.notFound().message);
       response.close();
-      return Future.value();
+      return ;
     }
 
     _handlerResult(httpModules, request, response);
-    return null;
   }
 
   ///处理模块返回值
-  Future _handlerResult(HttpModules httpModules,HttpRequest request,HttpResponse response) async {
+  void _handlerResult(HttpModules httpModules,HttpRequest request,HttpResponse response) async {
     runZonedGuarded(() {
-      httpModules.handler(request, response).then((value)  {
+      httpModules.handler(request, response).then((value) {
         //处理返回状态码
-        if(value is AlkaidStatus) {
-          switch(value) {
+        if (value is AlkaidStatus) {
+          switch (value) {
             case AlkaidStatus.finish:
-              return Future.value();
+              _cleanRequest(request);
+              return;
             case AlkaidStatus.fail:
               HttpModules? module = httpModuleChain.next(httpModules);
-              if(module == null) {
-                if( modulesCollection.hasValues(request)) {
-                  if(modulesCollection.isException(request)) {
-                    _sendError(request,response, modulesCollection.get(request));
-                  } else {
-                    _sendResponse(response, modulesCollection.get(request));
-                  }
-                } else {
-                  throw AlkaidHttpException.internalServerError();
-                }
+              //模块链最后一个模块
+              if (module == null) {
+                _lastModule(request, response);
               } else {
                 return _handlerResult(module, request, response);
               }
               break;
             case AlkaidStatus.stop:
-              var value = modulesCollection.get(request);
-              if(value != null) {
-                if(value is AlkaidHttpException) {
-                  _sendError(request,response, value);
-                } else {
-                  _sendResponse(response, value);
-                }
-              } else {
-                response.close();
-              }
-              break;
+              _lastModule(request, response);
+              return;
             case AlkaidStatus.wait:
               HttpModules? module = httpModuleChain.next(httpModules);
-              if(module == null) {
-                throw AlkaidHttpException.badRequest();
+              if (module == null) {
+                _lastModule(request, response);
+                return;
               }
               module.write = true;
               httpModules.later(request, response);
               return _handlerResult(module, request, response);
-            default:throw AlkaidHttpException.internalServerError();
+            default:
+              throw AlkaidHttpException.internalServerError();
           }
-        } else if(value == null) {
-          _logHttp(request, response);
-          return Future.value();
         } else {
-          return _serialization(request, response,value);
+           _serialization(request, response, value);
         }
       });
-    }, (error, stack) {
-      _handlerError(error, stack, request);
-      //接着循环
+    },(err,stack){
+      //发生了异常
+      _handlerError(err, stack, request);
       HttpModules? module = httpModuleChain.next(httpModules);
       if(module == null) {
-        _sendError(request, response, error as AlkaidException);
+        _lastModule(request, response);
       } else {
-        _handlerResult(module, request, response);
+        return _handlerResult(module, request, response);
       }
     });
   }
@@ -142,7 +128,7 @@ class DriverHttpModule implements HttpModules {
   ///发送错误
   void _sendError(HttpRequest request,HttpResponse response,AlkaidException alkaidException ) {
     if(alkaidException is AlkaidServerException) {
-      _logServer(request, alkaidException);
+      _logServer(alkaidException,Level.INFO);
       return ;
     }
     try {
@@ -151,37 +137,41 @@ class DriverHttpModule implements HttpModules {
       response.write((alkaidException).message);
       response.close();
       _logHttp(request, response);
-    } catch(err) {print(err);}
+    } catch(err) {
+      print(err);
+    }finally{
+      _cleanRequest(request);
+    }
   }
 
-  void _sendResponse(HttpResponse response,dynamic value) {
+  void _sendResponse(HttpRequest request,HttpResponse response,dynamic value) {
     try {
       response.write(value);
       response.close();
     } catch(err) {
       print(err);
+    }finally{
+      _cleanRequest(request);
     }
   }
 
   void _logHttp(HttpRequest request,HttpResponse response) {
-    alkaidLogging.httpLogger.info(
-        '${request.connectionInfo?.remoteAddress.host} -- [${DateTime.now().toIso8601String()}] ${request.method} ${request.uri.path} ${response.statusCode} ${request.headers.value('x-operating-system')}'
-    );
+    alkaidLogging.httpLog(request, response);
   }
 
-  void _logServer(HttpRequest request,AlkaidServerException alkaidServerException) {
-    alkaidLogging.serverLogger.info(
-        '${DateTime.now().toIso8601String()}  ${request.connectionInfo?.remoteAddress.host} ${request.method} ${request.uri.path} ${alkaidServerException.message}'
-    );
+  void _logServer(AlkaidServerException alkaidServerException,Level level) {
+    alkaidLogging.serverLog(alkaidServerException, level);
   }
 
-  Future _serialization(HttpRequest request,HttpResponse response,dynamic value) {
+  dynamic _serialization(HttpRequest request,HttpResponse response,dynamic value) {
     if(value == null) {
-      response.close();
+      // _cleanRequest(request);
+      return ;
     }
     response.write(value.toString());
     response.close();
-    return Future.value();
+    _cleanRequest(request);
+    return ;
   }
 
   @override
@@ -206,6 +196,19 @@ class DriverHttpModule implements HttpModules {
   }
 
 
+  void _cleanRequest(HttpRequest request) => modulesCollection.remove(request);
 
-
+  //遍历到模块链最后一个模块
+  void _lastModule(HttpRequest request,HttpResponse response) {
+    var value = modulesCollection.get(request);
+    if(value is AlkaidHttpException) {
+      _sendError(request, response, value);
+    } else if( value is Exception || value is Error) {
+      _sendError(request, response, AlkaidHttpException.internalServerError());
+    } else if(value == null){
+      _sendResponse(request, response, AlkaidHttpException.notFound());
+    } else {
+      _sendResponse(request, response, value);
+    }
+  }
 }

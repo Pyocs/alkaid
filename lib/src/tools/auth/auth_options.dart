@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'auth_jwt_token.dart';
+import 'jwt/auth_jwt_token.dart';
 
 ///生成token回调函数
 typedef AuthCallback = FutureOr Function(HttpRequest request,HttpResponse response,String token);

@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
-import '../../../alkaid.dart';
-import 'auth_options.dart';
-import 'auth_strategy.dart';
+import '../../../../alkaid.dart';
+import '../auth_options.dart';
+import '../auth_strategy.dart';
 import 'auth_jwt_token.dart';
 
 ///JWT用户认证服务

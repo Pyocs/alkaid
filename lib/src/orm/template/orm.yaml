@@ -1,0 +1,57 @@
+database:
+  name: mybatis
+  tables:
+    - table:
+        name: address_inf
+        order: 3
+        rows:
+          - row:
+              name: addr_id
+              type: int
+              constraint: primary auto unique
+          - row:
+              name: addr_detail
+              type: varchar(255)
+              constraint: not default(chain)
+          - row:
+              name: owner_id
+              type: int
+              constraint: not foreign(todo_inf,id)
+          - row:
+              name: addr_ids
+              type: int
+              constraint: not foreign(person_inf person_id)
+    - table:
+        name: todo_inf
+        order: 1
+        rows:
+          - row:
+              name: id
+              type: int
+              constraint: primary not auto
+          - row:
+              name: todo_name
+              type: varchar(255)
+              constraint: not
+          - row:
+              name: todo_birthday
+              type: date
+              constraint: not
+    - table:
+        name: person_inf
+        order: 1
+        contain: address(many),todo(one)
+        serial: true
+        rows:
+          - row:
+              name: person_id
+              type: int
+              constraint: not primary auto
+          - row:
+              name: person_name
+              type: varchar(255)
+              constraint: not
+          - row:
+              name: person_age
+              type: int
+              constraint:

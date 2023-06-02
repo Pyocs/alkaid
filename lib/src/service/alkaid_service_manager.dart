@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 import 'dart:mirrors';
-
 import '../modules.dart';
 import '../annotation/request_method_annotation.dart';
 import '../exception/alkaid_server_exception.dart';
@@ -319,7 +318,7 @@ class AlkaidServiceManager  {
   ///[path] 请求路径
   ///[method] 请求方法
   ///[handRequest] 拦截方法
-  ///[before] 是否为before,否则为after
+  ///[before] 默认before,否则为after
   void intercept(String name,String path,String method,HandlerRequest handlerRequest,bool before) {
     AlkaidService? alkaidService = _services[name];
     if(alkaidService == null) {
@@ -370,6 +369,7 @@ class AlkaidServiceManager  {
       }
     });
   }
+
 
 }
 

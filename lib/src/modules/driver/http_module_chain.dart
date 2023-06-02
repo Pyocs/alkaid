@@ -1,3 +1,5 @@
+import 'package:io/ansi.dart';
+
 import '../http_module.dart';
 
 ///模块链，用于存储、添加、删除、获取模块
@@ -80,6 +82,19 @@ class HttpModuleChain {
     return null;
   }
 
+  bool contains(String name) {
+    return _chain.any((element) => element.name == name);
+  }
+
+  HttpModules? getByName(String name) {
+    for(int i = 0 ; i < _chain.length ; i++) {
+      if(_chain[i].name == name) {
+        return _chain[i];
+      }
+    }
+    return null;
+  }
+
 
   ///二分查找该模块在列表中的索引
   ///如果模块数量多建议使用
@@ -101,6 +116,38 @@ class HttpModuleChain {
       }
     }
     return -1;
+  }
+
+  ///添加到模块链的第一个
+  void addFirst(HttpModules httpModules) {
+    _chain.insert(0, httpModules);
+  }
+
+  void addLast(HttpModules httpModules) {
+    _chain.insert(_chain.length, httpModules);
+  }
+
+  //插入到指定模块的后面
+  void _addAfter(String name,HttpModules httpModules) {
+    for(int i = 0 ; i < _chain.length ; i++) {
+      if(_chain[i].name == name) {
+        httpModules.weight = _chain[i].weight;
+        _chain.insert(i, httpModules);
+        return ;
+      }
+    }
+    print(red.wrap('$name not found!'));
+  }
+
+  void _addBefore(String name,HttpModules httpModules) {
+    for(int i = 0 ; i < _chain.length ; i++) {
+      if(_chain[i].name == name) {
+        httpModules.weight = _chain[i].weight;
+        _chain.insert(i+1, httpModules);
+        return ;
+      }
+    }
+    print(red.wrap('$name not found!'));
   }
 
   @override

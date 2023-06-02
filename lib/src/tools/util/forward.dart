@@ -15,12 +15,19 @@ import 'dart:io';
 ///请求转发
 ///通过HttpClient重新发送请求
 final HttpClient httpClient = HttpClient();
-void forward(HttpRequest request,HttpResponse response,String uri,String method,{bool close = true}) async {
-  if(!uri.startsWith('/')) {
+void forward(HttpRequest request,HttpResponse response,String uri,String method,{bool close = true,bool out = false}) async {
+  if(!out && !uri.startsWith('/')) {
     uri = '/$uri';
   }
   Completer completer = Completer<void>();
-  Uri host = Uri.parse('${request.requestedUri.scheme}://${request.requestedUri.authority}$uri');
+  Uri host;
+  if(out == false) {
+     host = Uri.parse(
+        '${request.requestedUri.scheme}://${request.requestedUri
+            .authority}$uri');
+  } else {
+     host = Uri.parse(uri);
+  }
   HttpClientRequest httpClientRequest = await httpClient.openUrl(method, host);
   httpClientRequest.headers.clear();
   request.headers.forEach((name, values) {

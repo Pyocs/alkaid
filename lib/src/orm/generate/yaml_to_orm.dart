@@ -5,11 +5,11 @@ import 'package:yaml/yaml.dart';
 List<String> removeFileNames = [];
 
 ///将YAML文件序列化成class
-class YamlToRom {
+class YamlToOrm {
 
   ///filePath：文件路径
   ///outPath： 输出路径
-  void start(String filePath,String outPath) async {
+  Future<void> start(String filePath,String outPath) async {
     if(outPath.endsWith('/')) {
       outPath = outPath.substring(0,outPath.length -1);
     }
@@ -32,6 +32,10 @@ class YamlToRom {
       //默认会删除最后一个_后面的内容
       temp.removeLast();
       String fileName = temp.join('_');
+      Directory directory = Directory(outPath);
+      if(!directory.existsSync()) {
+        directory.createSync(recursive: true);
+      }
       File file = File('$outPath/$fileName.dart');
       file.writeAsStringSync(_rendering(table));
       if (table.serial == false) {

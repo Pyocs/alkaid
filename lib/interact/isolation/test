@@ -1,0 +1,22 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:alkaid/alkaid.dart';
+
+void main() async {
+  HttpServer httpServer = await HttpServer.bind('localhost',0);
+  print(httpServer.port);
+  httpServer.listen((request) {
+    #replace
+  });
+
+  stdin.transform(utf8.decoder).listen((event)  async {
+    if(event.trim() == 'exit') {
+      print("正在关闭");
+      await httpServer.close();
+      exit(0);
+    }
+  });
+}
+
+
+

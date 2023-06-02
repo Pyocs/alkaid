@@ -1,21 +1,24 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:collection';
-
 import '../exception/alkaid_exception.dart';
-
+import 'http_context_meta.dart';
 
 ///事件总线，用于存储HttpRequest的上下文信息
-
 class ModulesCollection {
   final _HttpContext _httpContext = _HttpContext();
-
   final StreamController _controller = StreamController.broadcast();
+  //监听的请求列表
+  final Map<HttpRequest,Completer> _listenMap = HashMap();
 
+  int get length => _httpContext.context.length;
 
   void add(HttpContextMeta httpContextMeta) {
     _controller.add(null);
     _httpContext.add(httpContextMeta.request, httpContextMeta.value);
+    if(_listenMap.keys.contains(httpContextMeta.request)) {
+      _listenMap[httpContextMeta.request]!.complete();
+    }
   }
 
   void addAll(List<HttpContextMeta> list) {
@@ -23,6 +26,9 @@ class ModulesCollection {
     Map<HttpRequest,dynamic> map = {};
     for (var element in list) {
       map.addEntries({element.request:element.value}.entries);
+      if(_listenMap.keys.contains(element.request)) {
+        _listenMap[element.request]!.complete();
+      }
     }
     _httpContext.addAll(map);
   }
@@ -34,23 +40,23 @@ class ModulesCollection {
     } else {
       _httpContext.repeatValue(request, value);
     }
+    if(_listenMap.keys.contains(request)) {
+      _listenMap[request]!.complete();
+    }
   }
 
   bool isException(HttpRequest request) => _httpContext.isException(request);
 
   dynamic get(HttpRequest request) => _httpContext.get(request);
 
-  Future<dynamic> getFuture(HttpRequest request,Duration timeout) async {
-    dynamic result;
-    var start = DateTime.now();
-    while((DateTime.now().difference(start)).inMicroseconds < timeout.inMicroseconds) {
-      result = _httpContext.get(request);
-      if(result != null) {
-        return result;
-      }
-    }
-    return result;
-  }
+  // Future<dynamic> getFuture(HttpRequest request,Duration timeout) async {
+  //   Completer<dynamic> completer = Completer<dynamic>();
+  //   Future.delayed(timeout,() {
+  //     completer.complete(get(request));
+  //   });
+  //
+  //   return completer.future;
+  // }
 
   bool hasValues(HttpRequest request) => _httpContext.hasValue(request);
 
@@ -58,22 +64,48 @@ class ModulesCollection {
 
   StreamSubscription listen(void Function(dynamic value)? onData ,{Function? onError}) => _controller.stream.listen(onData,onError: onError);
 
+  //对事件总线中的某个请求进行监听，如果该请求的值发生改变则返回新的值
+  //如果timeout內没有改变则返回null
+  Future listenRequest(HttpRequest request,Duration timeout) {
+    if(!_listenMap.keys.contains(request)) {
+      _listenMap[request] = Completer();
+    }
+    //监听值是否发生改变
+    Completer<dynamic> completer = Completer<dynamic>();
+
+    Timer timer = Timer(timeout, () {
+      _listenMap.remove(request);
+      return completer.complete(null);
+    });
+
+    _listenMap[request]!.future.then((value) {
+        timer.cancel();
+        completer.complete(get(request));
+    });
+
+    return completer.future;
+  }
+
+  void remove(HttpRequest request) {
+    _httpContext.context.remove(request);
+    if(_listenMap.keys.contains(request)) {
+      _listenMap[request]!.complete();
+    }
+  }
+
+  void removeAll() {
+    _httpContext.context.clear();
+    _listenMap.clear();
+  }
 }
 
-class HttpContextMeta {
-  final HttpRequest _httpRequest;
-  dynamic value;
 
-  HttpRequest get request => _httpRequest;
-
-  HttpContextMeta(this._httpRequest,this.value);
-}
 
 class _HttpContext {
   final HashMap<HttpRequest,dynamic> _context = HashMap.identity();
-
+  HashMap<HttpRequest,dynamic> get  context => _context;
   ///添加一个请求数据
-  ///如果该请求已在事件总线中，则抛出异常
+  ///如果该请求已在事件总线中，则替换
   void add(HttpRequest request,dynamic value) => _context[request] = value;
 
   ///添加所有
@@ -99,7 +131,7 @@ class _HttpContext {
 
   ///判断值是否为异常
   bool isException(HttpRequest httpRequest) {
-    if(_context.containsKey(httpRequest) && _context[httpRequest] is AlkaidException) {
+    if(_context.containsKey(httpRequest) && _context[httpRequest].runtimeType ==  AlkaidException) {
       return true;
     } else {
       return false;

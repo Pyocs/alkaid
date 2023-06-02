@@ -45,7 +45,7 @@ class DatabaseGeneration {
     final uris = <Uri>[];
 
     await for(var entity in directory.list(recursive: true,followLinks: false)) {
-      if(entity is File && entity.path.contains('.dart')) {
+      if(entity is File && entity.path.endsWith('.dart')) {
         // print(entity.path);
         uris.add(Uri.parse('package:$packageName${entity.path.replaceAll('lib', '')}'));
       }

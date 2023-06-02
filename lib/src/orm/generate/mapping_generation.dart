@@ -14,23 +14,44 @@ class MappingGeneration {
   //文件最后保存的路径
   //默认保存到当前文件夹下的 impl/
 
+  //dao文件保存的文件夹
+  String daoPath;
 
-  MappingGeneration();
+  MappingGeneration(this.daoPath);
 
   Future<void> start() async {
+    if(!daoPath.endsWith('/')) {
+      daoPath = '$daoPath/';
+    }
     final directory = Directory('lib');
     YamlMap yamlMap = loadYaml(File('pubspec.yaml').readAsStringSync());
     String packageName = yamlMap['name'];
     final uris = <Uri>[];
 
     await for(var entity in directory.list(recursive: true,followLinks: false)) {
-      if(entity is File && entity.path.contains('.dart')) {
+      if(entity is File && entity.path.endsWith('.dart')) {
         // print(entity.path);
         uris.add(Uri.parse('package:$packageName${entity.path.replaceAll('lib', '')}'));
       }
     }
 
     IsolateMirror isolateMirror = currentMirrorSystem().isolate;
+    for(var uri in uris) {
+      LibraryMirror libraryMirror = await isolateMirror.loadUri(uri);
+      libraryMirror.declarations.forEach((symbol, declaration) {
+        //寻找@Table类，生成抽象Mapping
+        if(declaration is ClassMirror && declaration.metadata.any((element) => element.runtimeType is Table)) {
+          String fileName = uri.path.split('/').last;
+          fileName = fileName.replaceAll('.dart', '_mapping.dart');
+          Directory directory = Directory(daoPath);
+          if(!directory.existsSync()) {
+            directory.createSync(recursive: true);
+          }
+          _generationAbstractMapping(declaration, '$daoPath$fileName');
+        }
+      });
+    }
+
     for(var uri in uris) {
       LibraryMirror libraryMirror = await isolateMirror.loadUri(uri);
       libraryMirror.declarations.forEach((symbol, declaration) {
@@ -45,6 +66,7 @@ class MappingGeneration {
         }
       });
     }
+
   }
 
 
@@ -56,7 +78,7 @@ class MappingGeneration {
     String abstractClassName = '${MirrorSystem.getName(classMirror.simpleName)}Mapping';
 
     file.writeAsStringSync('''
-import 'package:hello/modules/annotation/database_annotation.dart';
+import 'package:alkaid/alkaid.dart';
 
 @ORM()
 abstract class $abstractClassName {
@@ -99,9 +121,9 @@ abstract class $abstractClassName {
     result += '''
 import 'dart:mirrors';
 import '../$fileName';
-import 'package:hello/modules/orm/alkaid_orm.dart';
+import 'package:alkaid/src/orm/alkaid_orm.dart';
 import 'package:mysql_client/mysql_client.dart';
-import 'package:hello/modules/annotation/database_annotation.dart';
+import 'package:alkaid/alkaid.dart';
 
 class ${className}Impl with AlkaidORM implements $className {
 

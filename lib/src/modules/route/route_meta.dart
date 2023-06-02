@@ -2,7 +2,7 @@ import 'dart:io';
 
 import '../../exception/alkaid_server_exception.dart';
 
-typedef HandlerRequest = Future Function(HttpRequest request,HttpResponse response);
+typedef HandlerRequest = dynamic Function(HttpRequest request,HttpResponse response);
 
 const requestMethod = <String>['get','GET','post','POST','put','PUT','delete','DELETE',
   'patch','PATCH','copy','COPY','head','HEAD','options','OPTIONS'];

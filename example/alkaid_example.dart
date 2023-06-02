@@ -1,5 +1,4 @@
 import 'package:alkaid/alkaid.dart';
-
 void main() async {
   AlkaidServer alkaidServer = await  AlkaidServer.server('localhost', 3000);
   await alkaidServer.start();

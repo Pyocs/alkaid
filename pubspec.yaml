@@ -15,6 +15,9 @@ dependencies:
   mime: ^1.0.4
   mysql_client: ^0.0.27
   path: ^1.8.3
+  redis: ^3.1.0
+  vm_service: ^11.6.0
+  watcher: ^1.1.0
   yaml: ^3.1.2
 
 dev_dependencies:

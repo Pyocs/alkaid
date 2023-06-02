@@ -34,7 +34,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
-import '../../../alkaid.dart';
+import '../../../../alkaid.dart';
 
 
 String decodeBase64(String str) {

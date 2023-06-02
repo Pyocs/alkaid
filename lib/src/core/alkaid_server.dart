@@ -1,16 +1,16 @@
 import 'dart:io';
+import 'package:alkaid/src/modules/cross/cross_http_module.dart';
 import 'package:alkaid/src/service/alkaid_service_manager.dart';
 import 'package:file/local.dart';
 import 'package:io/ansi.dart';
 import '../exception/alkaid_server_exception.dart';
 import '../inject/alkaid_inject.dart';
-import '../modules/driver/alkaid_logging.dart';
 import '../modules/driver/driver_http_module.dart';
 import '../modules/driver/http_module_chain.dart';
 import '../modules/route/route_http_module.dart';
 import 'modules_collection.dart';
 import '../modules/static/static_http_module.dart';
-
+import '../logging/alkaid_logging.dart';
 
 class AlkaidServer {
   static  late final  AlkaidServer? _alkaidServer;
@@ -28,9 +28,10 @@ class AlkaidServer {
   //静态资源模块
   late final StaticHttpModule _staticHttpModule;
   late final DriverHttpModule _driverHttpModule;
+  late final CrossHttpModule _crossHttpModule;
   //服务管理器
   late final AlkaidServiceManager _alkaidServiceManager;
-
+  late final bool _inject;
   late final bool _hasSecure;
 
   int get sessionTimeout => _sessionTimeout;
@@ -38,13 +39,14 @@ class AlkaidServer {
   ModulesCollection get modulesCollection => _modulesCollection;
   RouterHttpModule get routerHttpModule => _routerHttpModule;
   StaticHttpModule get staticHttpModule => _staticHttpModule;
+  CrossHttpModule get crossHttpModule => _crossHttpModule;
   AlkaidServiceManager get alkaidServiceManager => _alkaidServiceManager;
 
   bool get hasSecure => _hasSecure;
-  AlkaidServer._();
+  AlkaidServer._(this._inject);
 
-  static Future<AlkaidServer> server(dynamic address,int port,{bool shared = false,int? sessionTimeout}) async {
-    AlkaidServer alkaidServer = AlkaidServer._();
+  static Future<AlkaidServer> server(dynamic address,int port,{bool shared = false,int? sessionTimeout,bool inject = true}) async {
+    AlkaidServer alkaidServer = AlkaidServer._(inject);
     alkaidServer._httpServer = await HttpServer.bind(address, port,shared: shared);
     alkaidServer._hasSecure = false;
     if(sessionTimeout != null) {
@@ -53,12 +55,11 @@ class AlkaidServer {
     } else {
       alkaidServer._sessionTimeout = 1200;
     }
-
     return alkaidServer;
   }
 
-  static Future<AlkaidServer> secureServer(dynamic address,int port,SecurityContext context,{bool shared = false,int? sessionTimeout}) async {
-    AlkaidServer alkaidServer = AlkaidServer._();
+  static Future<AlkaidServer> secureServer(dynamic address,int port,SecurityContext context,{bool shared = false,int? sessionTimeout,bool inject = true}) async {
+    AlkaidServer alkaidServer = AlkaidServer._(inject);
     alkaidServer._httpServer = await HttpServer.bindSecure(address, port, context,shared: shared);
     alkaidServer._hasSecure = true;
     if(sessionTimeout != null) {
@@ -74,7 +75,8 @@ class AlkaidServer {
     _httpModuleChain = HttpModuleChain();
     _routerHttpModule = RouterHttpModule('router',weight: 5);
     _staticHttpModule = StaticHttpModule(LocalFileSystem(), 'web', 'static',weight: 4);
-    _httpModuleChain.addAll([_routerHttpModule,_staticHttpModule]);
+    _crossHttpModule = CrossHttpModule('cross',weight: 1);
+    _httpModuleChain.addAll([_routerHttpModule,_staticHttpModule,_crossHttpModule]);
     _driverHttpModule = DriverHttpModule(_httpModuleChain, _modulesCollection, _alkaidLogging);
     _alkaidServiceManager = AlkaidServiceManager(_routerHttpModule);
   }
@@ -96,7 +98,9 @@ class AlkaidServer {
 
     //反射注入
     _init();
-    await AlkaidInject(_routerHttpModule).start();
+    if(_inject) {
+      await AlkaidInject(_routerHttpModule).start();
+    }
 
     _httpServer.listen((HttpRequest request) {
       _driverHttpModule.handler(request, request.response);
@@ -118,5 +122,6 @@ class AlkaidServer {
     }
     return _alkaidServer!;
   }
+
 }
 
