@@ -14,9 +14,9 @@ class YamlToOrm {
       outPath = outPath.substring(0,outPath.length -1);
     }
     //保存路径为domain
-    if(!outPath.endsWith('domain')) {
-      outPath += '/domain';
-    }
+    // if(!outPath.endsWith('domain')) {
+    //   outPath += '/domain';
+    // }
 
     YamlMap yamlMap = await loadYaml(File(filePath).readAsStringSync());
 
@@ -39,11 +39,16 @@ class YamlToOrm {
       File file = File('$outPath/$fileName.dart');
       file.writeAsStringSync(_rendering(table));
       if (table.serial == false) {
-        removeFileNames.add(fileName);
+        removeFileNames.add('$outPath/$fileName.dart');
       }
     }
 
-
+    for(var element in removeFileNames) {
+      File file = File(element);
+      if(file.existsSync()) {
+        file.deleteSync();
+      }
+    }
   }
 
 
@@ -65,7 +70,7 @@ class YamlToOrm {
     }
 
     String result = '''
-import 'package:hello/modules/annotation/database_annotation.dart;'
+import 'package:alkaid/alkaid.dart';
 
 @Table('${table.name}',order: ${table.order})
 class $className  {\n
@@ -129,11 +134,13 @@ class $className  {\n
         varType = 'double';
       } else if (row.type.contains('date')) {
         varType = 'DateTime';
+      } else if(row.type.contains('timestamp')) {
+        varType = 'DateTime';
       } else {
         varType = 'dynamic';
       }
 
-      if (isNull) {
+      if (isNull && varType != 'dynamic') {
         varType += '?';
       }
 
@@ -181,10 +188,18 @@ class $className  {\n
     result += '''
   $className();\n
   $constructorString\n
+${_toString(varNames)}
+}
+''';
+    /*
+        result += '''
+  $className();\n
+  $constructorString\n
 ${_hashCodeToString(varNames, sqlNames)}\n
 ${_toString(varNames)}
 }
 ''';
+     */
     return result;
   }
 
@@ -252,8 +267,8 @@ ${_toString(varNames)}
 
   _Table _processTable(Map table) {
     String name = table['name'];
-    int order = table['order'] ??= 1;
-
+    int order = table['order'] ?? 1;
+    String? comment = table['comment'];
     //是否系列化为class
     bool serial;
     if (table['serial'] == null) {
@@ -276,15 +291,15 @@ ${_toString(varNames)}
       rows.add(_processRows(row['row']));
     }
 
-    return _Table(name, order, rows, contain, serial);
+    return _Table(name, order, rows, contain, serial,comment);
   }
 
   _Row _processRows(Map row) {
     String name = row['name'];
     String type = row['type'];
     List<String> constraint = row['constraint'].toString().split(' ');
-
-    return _Row(name, type, constraint);
+    String? comment = row['comment'];
+    return _Row(name, type, constraint,comment);
   }
 
 }
@@ -300,7 +315,9 @@ class _Table {
 
   final bool serial;
 
-  const _Table(this.name,this.order,this.rows,this.contain,this.serial);
+  final String? comment;
+
+  const _Table(this.name,this.order,this.rows,this.contain,this.serial,this.comment);
 }
 
 class _Row {
@@ -310,6 +327,8 @@ class _Row {
 
   final List<String> constraint;
 
-  const _Row(this.name,this.type,this.constraint);
+  final String? comment;
+
+  const _Row(this.name,this.type,this.constraint,this.comment);
 
 }

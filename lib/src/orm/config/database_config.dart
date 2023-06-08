@@ -19,9 +19,9 @@ class DatabaseConfig {
 
   String get password => _password;
 
-  bool? _secure;
+  late final bool _secure;
 
-  bool? get secure => _secure;
+  bool get secure => _secure;
 
   late final String? _databaseName;
 

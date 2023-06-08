@@ -35,8 +35,8 @@ class AlkaidLogging {
       }
     }
     _httpName = '$_dirName/http.log';
-    _serverName = '$_serverName/server.log';
-    _errorName = '$_errorName/error.log';
+    _serverName = '$_dirName/server.log';
+    _errorName = '$_dirName/error.log';
     _init();
   }
 

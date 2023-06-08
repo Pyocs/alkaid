@@ -15,6 +15,9 @@ class PreparedStmtCache {
   }
 
   PreparedStmt? deleteValue(String sql) {
+    if(_cache[sql.hashCode] != null) {
+      _cache[sql.hashCode]!.deallocate();
+    }
     return _cache.remove(sql.hashCode);
   }
 

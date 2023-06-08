@@ -5,10 +5,11 @@ import 'preparedstmt_cache.dart';
 
 
 ///使用注解进行ORM操作的混合类
+final _valueRegExp =  RegExp(r'VALUES|values');
 mixin AlkaidORM {
-  late final MySQLConnection mySQLConnection;
+  MySQLConnection? _mySQLConnection;
 
-  late final PreparedStmtCache _cache;
+   final PreparedStmtCache _cache = PreparedStmtCache();
 
   late bool autocommit = false ;
   ///是否开启缓存
@@ -17,52 +18,67 @@ mixin AlkaidORM {
   bool _hasList = false;
 
   TypeMirror listTypeMirror = reflectType(List);
+  bool get hasMysqlConnection => _mySQLConnection != null;
+
+  set mysqlConnection(MySQLConnection? mySQLConnection) {
+    _mySQLConnection = mySQLConnection;
+  }
+
+  MySQLConnection clearMySqlConnection() {
+    if(hasMysqlConnection) {
+      MySQLConnection mySQLConnection = _mySQLConnection!;
+      _mySQLConnection = null;
+      return mySQLConnection;
+    } else {
+      throw 'mysqlConnection not init';
+    }
+  }
 
   //框架初始化时调用
-  void init(MySQLConnection mySQLConnection,{bool? cache}) {
-    this.mySQLConnection = mySQLConnection;
-    if(cache != null) {
-      canCache = cache;
-    }
-    _cache = PreparedStmtCache();
-  }
+  // void init(MySQLConnection? mySQLConnection,{bo) {
+  //   _mySQLConnection = mySQLConnection;
+  //   if(cache != null) {
+  //     canCache = cache;
+  //   }
+  //   _cache = PreparedStmtCache();
+  // }
 
   ///开启临时事务
   Future<void> startTransactionMixin() async {
-    await mySQLConnection.execute('start transaction');
+    await _mySQLConnection!.execute('start transaction');
   }
 
   ///提交事务
   Future<void> commitMixin() async {
-    await mySQLConnection.execute('commit');
+    await _mySQLConnection!.execute('commit');
   }
 
   ///回滚事务
   Future<void> rollbackMixin() async {
-    await mySQLConnection.execute('rollback');
+    await _mySQLConnection!.execute('rollback');
   }
 
   ///设置事务的中间点
   Future<void> savepointMixin(String name) async {
-    await mySQLConnection.execute('savepoint $name');
+    await _mySQLConnection!.execute('savepoint $name');
   }
 
   ///回滚到指定中间点
   Future<void> rollbackToMixin(String name) async {
-    await mySQLConnection.execute('rollback to $name');
+    await _mySQLConnection!.execute('rollback to $name');
   }
 
   ///设置本次连接开启事务，及手动提交
   Future<void> startAutocommitMixin() async{
     if(!autocommit) {
-      await mySQLConnection.execute('set autocommit = 0');
+      await _mySQLConnection!.execute('set autocommit = 0');
       autocommit = true;
     }
   }
 
   Future<void> closeAutocommitMixin() async {
     if(autocommit) {
-      await mySQLConnection.execute('set autocommit = 1');
+      await _mySQLConnection!.execute('set autocommit = 1');
       autocommit = false;
     }
   }
@@ -73,7 +89,7 @@ mixin AlkaidORM {
 
   Future<void> closeMixin()  async {
     await _cache.clear();
-    await mySQLConnection.close();
+    await _mySQLConnection!.close();
   }
 
   bool _isOrm(ClassMirror classMirror) {
@@ -103,7 +119,7 @@ mixin AlkaidORM {
       preparedStmt = _cache.getValue(select.sql);
     }
     if(preparedStmt == null) {
-      preparedStmt = await mySQLConnection.prepare(select.sql);
+      preparedStmt = await _mySQLConnection!.prepare(select.sql);
       if (canCache) {
         _cache.addValue(select.sql, preparedStmt);
       }
@@ -146,7 +162,7 @@ mixin AlkaidORM {
     List result = [];
     //是否为全部插入,values前是否有()
     bool allInsert;
-    if(sql.substring(0,sql.lastIndexOf(RegExp(r'VALUES|values'))).contains('(') || sql.substring(0,sql.lastIndexOf(RegExp(r'VALUES|values'))).contains(')')) {
+    if(sql.substring(0,sql.lastIndexOf(_valueRegExp)).contains('(') || sql.substring(0,sql.lastIndexOf(_valueRegExp)).contains(')')) {
       allInsert = false;
     } else {
       allInsert = true;
@@ -195,13 +211,21 @@ mixin AlkaidORM {
       }
     }
 
+    //判断values()中的变量个数，删除result中多余的变量
+    List<String> elements = sql.substring(sql.lastIndexOf(_valueRegExp)).replaceAll(')', '').replaceAll('(', '').replaceAll(_valueRegExp, '').split(',');
+    for(int i = 0 ; i < elements.length ; i++) {
+      if(elements[i] != '?') {
+        result.removeAt(i);
+      }
+    }
+
     PreparedStmt? preparedStmt;
     if(canCache) {
       preparedStmt =  _cache.getValue(sql);
     }
     try {
       if(preparedStmt == null) {
-        preparedStmt = await mySQLConnection.prepare(sql);
+        preparedStmt = await _mySQLConnection!.prepare(sql);
         if (canCache) {
           _cache.addValue(sql, preparedStmt);
         }
@@ -282,7 +306,7 @@ mixin AlkaidORM {
     }
     try {
       if(preparedStmt == null) {
-        preparedStmt = await mySQLConnection.prepare(sql);
+        preparedStmt = await _mySQLConnection!.prepare(sql);
         if (canCache) {
           _cache.addValue(sql, preparedStmt);
         }
@@ -300,18 +324,35 @@ mixin AlkaidORM {
 
   dynamic deleteMixin(Delete delete ,List value) async {
     String sql = delete.sql;
+    List result = [];
+
+    if(value.every(_isSingleObject)) {
+      result.addAll(value);
+    } else {
+      //通过反射获取该对象全部的变量
+      for(var ele in value) {
+        var instance = reflect(ele);
+        var classMirror = instance.type;
+        classMirror.declarations.forEach((symbol, declaration) {
+          if(declaration is VariableMirror && _isSingleObject(declaration.type.reflectedType) && !declaration.type.isAssignableTo(listTypeMirror)) {
+            result.add(instance.getField(symbol).reflectee);
+          }
+        });
+      }
+    }
+
     PreparedStmt? preparedStmt;
     if(canCache) {
       preparedStmt =  _cache.getValue(sql);
     }
     try {
       if(preparedStmt == null) {
-        preparedStmt ??= await mySQLConnection.prepare(sql);
+        preparedStmt ??= await _mySQLConnection!.prepare(sql);
         if(canCache) {
           _cache.addValue(sql, preparedStmt);
         }
       }
-      IResultSet iResultSet = await preparedStmt.execute(value);
+      IResultSet iResultSet = await preparedStmt.execute(result);
       if(delete.resultSet != null && delete.resultSet == true) {
         return iResultSet;
       }

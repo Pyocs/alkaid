@@ -4,23 +4,28 @@ database:
     - table:
         name: address_inf
         order: 3
+        comment: "地址信息"
         rows:
           - row:
               name: addr_id
               type: int
               constraint: primary auto unique
+              comment: "地址id"
           - row:
               name: addr_detail
               type: varchar(255)
               constraint: not default(chain)
+              comment: "地址详细信息"
           - row:
               name: owner_id
               type: int
               constraint: not foreign(todo_inf,id)
+              comment: "用户id"
           - row:
               name: addr_ids
               type: int
               constraint: not foreign(person_inf person_id)
+              comment: "addrIds"
     - table:
         name: todo_inf
         order: 1

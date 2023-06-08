@@ -5,3 +5,9 @@
 # Avoid committing pubspec.lock for library packages; see
 # https://dart.dev/guides/libraries/private-files#pubspeclock.
 pubspec.lock
+.handler_generation_history
+.yaml_generation_history
+out.dart
+# cli工具缓存目录
+tmp/
+.idea

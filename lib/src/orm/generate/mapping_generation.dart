@@ -19,7 +19,7 @@ class MappingGeneration {
 
   MappingGeneration(this.daoPath);
 
-  Future<void> start() async {
+  Future<void> compileMapping() async {
     if(!daoPath.endsWith('/')) {
       daoPath = '$daoPath/';
     }
@@ -40,7 +40,7 @@ class MappingGeneration {
       LibraryMirror libraryMirror = await isolateMirror.loadUri(uri);
       libraryMirror.declarations.forEach((symbol, declaration) {
         //寻找@Table类，生成抽象Mapping
-        if(declaration is ClassMirror && declaration.metadata.any((element) => element.runtimeType is Table)) {
+        if(declaration is ClassMirror && declaration.metadata.any((element) => element.reflectee is Table)) {
           String fileName = uri.path.split('/').last;
           fileName = fileName.replaceAll('.dart', '_mapping.dart');
           Directory directory = Directory(daoPath);
@@ -52,6 +52,25 @@ class MappingGeneration {
       });
     }
 
+  }
+
+  Future<void> compileMappingImpl() async {
+    if(!daoPath.endsWith('/')) {
+      daoPath = '$daoPath/';
+    }
+    final directory = Directory('lib');
+    YamlMap yamlMap = loadYaml(File('pubspec.yaml').readAsStringSync());
+    String packageName = yamlMap['name'];
+    final uris = <Uri>[];
+
+    await for(var entity in directory.list(recursive: true,followLinks: false)) {
+      if(entity is File && entity.path.endsWith('.dart')) {
+        // print(entity.path);
+        uris.add(Uri.parse('package:$packageName${entity.path.replaceAll('lib', '')}'));
+      }
+    }
+
+    IsolateMirror isolateMirror = currentMirrorSystem().isolate;
     for(var uri in uris) {
       LibraryMirror libraryMirror = await isolateMirror.loadUri(uri);
       libraryMirror.declarations.forEach((symbol, declaration) {
@@ -66,7 +85,6 @@ class MappingGeneration {
         }
       });
     }
-
   }
 
 
@@ -127,6 +145,12 @@ import 'package:alkaid/alkaid.dart';
 
 class ${className}Impl with AlkaidORM implements $className {
 
+   set mysqlConnection(MySQLConnection mySQLConnection) {
+    this.mySQLConnection = mySQLConnection;
+  }
+  
+  ${className}Impl.late();
+  
   ${className}Impl(MySQLConnection mySQLConnection,{bool? cache}) {
     init(mySQLConnection,cache: cache);
   }
@@ -152,6 +176,11 @@ class ${className}Impl with AlkaidORM implements $className {
       return  isAutocommitMixin();
     } else if(name == 'close') {
       return await closeMixin();
+    } else if(name == 'mysqlConnection=') {
+      mysqlConnection = invocation.positionalArguments.first;
+      return ;
+    } else if(name == 'clearMySqlConnection') {
+      return clearMySqlConnection();
     }
 
     var owner = reflectClass($className);

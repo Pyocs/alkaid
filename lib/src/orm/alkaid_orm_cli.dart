@@ -27,12 +27,15 @@ class AlkaidOrmCli {
   late final MySQLConnection mySQLConnection;
   final GPT gpt = GPT();
   final YamlToOrm yamlToOrm = YamlToOrm();
-  late final DatabaseGeneration databaseGeneration;
+  late  DatabaseGeneration? databaseGeneration;
   MappingGeneration? mappingGeneration ;
+  late final DatabaseConfig databaseConfig;
   String configPath;
   late String _yamlPath;
 
-  AlkaidOrmCli({required this.yamlTemplatePath,required this.configPath});
+  AlkaidOrmCli({required this.yamlTemplatePath,required this.configPath}) {
+    _checkPackages();
+  }
   
   Future<void> _loadConnection() async {
     print(yellow.wrap('正在加载配置文件...'));
@@ -40,21 +43,31 @@ class AlkaidOrmCli {
     print("请选择数据库名称:");
     String name = _scannerString();
     if(configs.any((element) => element.name == name)) {
-      DatabaseConfig databaseConfig = configs.firstWhere((element) => element.name == name);
+       databaseConfig = configs.firstWhere((element) => element.name == name);
       mySQLConnection = await MySQLConnection.createConnection(
           host: databaseConfig.host,
           userName: databaseConfig.user,
           password: databaseConfig.password,
           port: databaseConfig.port,
-          secure: databaseConfig.secure!,
-          databaseName: databaseConfig.databaseName,
+          secure: databaseConfig.secure,
           collation: databaseConfig.collation
       );
       await mySQLConnection.connect();
       print(yellow.wrap('数据库连接完成'));
-      databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.databaseName!);
+      // databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.databaseName!);
     } else {
       print(red.wrap('没有$name配置项'));
+      exit(0);
+    }
+  }
+
+  void _checkPackages() {
+    bool sw(String s) {
+      return Platform.executableArguments.any((element) => element.startsWith(s));
+    }
+
+    if(!sw('--packages')) {
+      print(red.wrap('请添加 --packages=.dart_tool/package_config.json启动标志'));
       exit(0);
     }
   }
@@ -102,7 +115,9 @@ class AlkaidOrmCli {
             await _addMappingMethod(null);
             break;
           case 0:
-            mySQLConnection.close();
+            if(mySQLConnection.connected) {
+             await mySQLConnection.close();
+            }
             return;
           default:
             print(red.wrap("请重新输入"));
@@ -150,21 +165,35 @@ class AlkaidOrmCli {
 
   //3.序列化到数据库中
   Future<void> _toDatabase() async {
+    print(yellow.wrap('初始化时是否删除${databaseConfig.name}的内容?'));
+    bool t = _scannerBool();
+    if(t) {
+      databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.name,deleteDatabase: true);
+    } else {
+      databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.name,deleteDatabase: false);
+    }
     print("正在扫描lib下的所有模型文件...");
-    await databaseGeneration.start();
+    await databaseGeneration!.start();
   }
 
   //生成抽象Mapping和实现类
   Future<void> _compileMapping() async {
     if(mappingGeneration == null) {
-      print(yellow.wrap("请输入dao文件保存的路径(实现类默认在dao/impl/):"));
+      print(yellow.wrap("请输入dao文件保存的路径(实现类默认在impl/):"));
           String daoPath = _scannerString();
       mappingGeneration = MappingGeneration(daoPath);
     } else {
-      print(yellow.wrap('dao文件保存在:${mappingGeneration!.daoPath}'));
+      print(yellow.wrap('是否继续保存在${mappingGeneration!.daoPath}?'));
+      bool t = _scannerBool();
+      if(!t) {
+        print(yellow.wrap('请输入保存路径:'));
+        mappingGeneration!.daoPath = _scannerString();
+      }
     }
-    print(yellow.wrap('正在生成mapping以及实现类'));
-    await mappingGeneration!.start();
+    print(yellow.wrap('正在生成mapping'));
+    await mappingGeneration!.compileMapping();
+    print(yellow.wrap('正在生成mapping实现类'));
+    await mappingGeneration!.compileMappingImpl();
   }
 
 
