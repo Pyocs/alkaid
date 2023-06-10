@@ -168,9 +168,9 @@ class AlkaidOrmCli {
     print(yellow.wrap('初始化时是否删除${databaseConfig.name}的内容?'));
     bool t = _scannerBool();
     if(t) {
-      databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.name,deleteDatabase: true);
+      databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.databaseName!,deleteDatabase: true);
     } else {
-      databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.name,deleteDatabase: false);
+      databaseGeneration = DatabaseGeneration(mySQLConnection, databaseConfig.databaseName!,deleteDatabase: false);
     }
     print("正在扫描lib下的所有模型文件...");
     await databaseGeneration!.start();

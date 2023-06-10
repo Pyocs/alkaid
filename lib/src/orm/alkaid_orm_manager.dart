@@ -1,10 +1,10 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:mirrors';
 import 'package:alkaid/alkaid.dart';
 import 'package:alkaid/orm.dart';
 import 'package:alkaid/src/orm/alkaid_mysql_pool.dart';
-import 'package:io/ansi.dart';
 import 'package:mysql_client/mysql_client.dart';
 import 'package:yaml/yaml.dart';
 
@@ -24,6 +24,10 @@ class AlkaidOrmManager {
   final Map<int,bool> _isSingle = {};
   //usedCollection中mapping被使用的数量
   final Map<int,int> _usedNumbers = {};
+  //实际使用的数量，避免高并发出现错误
+  final Map<Type,int> _identityCapacity = {};
+  //等待队列
+  final Queue<(Completer,Type,bool)> _waitQueue = Queue();
   //实现类的目录
   final String _implPath;
   final String _scanPath;
@@ -59,13 +63,32 @@ class AlkaidOrmManager {
 
   Future<void> init() async => _inject();
 
-  FutureOr<dynamic> getInstance(Type type,{bool reuse = true}) async {
+  ///reuse 为true，则从busy中取出mapping，与其他线程共享mapping
+  Future<dynamic> getInstance(Type type,{bool reuse = true}) async {
     if(_types[type] == null) {
       throw AlkaidServerException('not found $type mapping');
     }
 
     //优先从usedCollection中获取实例，如果没有，而从collection获取实例并注入连接
-    if(_usedCollection[type]!.isNotEmpty && reuse) {
+    if(_collection[type]!.isNotEmpty) {
+      var obj = _collection[type]!.removeAt(0);
+      _identityCapacity[type] == null
+          ? _identityCapacity[type] = 1
+          : _identityCapacity[type] = _identityCapacity[type]! +1;
+      MySQLConnection mySQLConnection = await pool.getConnection();
+      reflect(obj).invoke(_setConnectionSymbol, [mySQLConnection]);
+      _usedCollection[type]!.add(obj);
+      _usedNumbers[obj.hashCode] = 1;
+      return obj;
+    } else if(maxMappingCapacity <= 0 || (_identityCapacity[type] != null && _identityCapacity[type]! < maxMappingCapacity)) {
+      var obj = _types[type]!.newInstance(Symbol(''), []);
+      _identityCapacity[type] = _identityCapacity[type]! + 1;
+      MySQLConnection mySQLConnection = await pool.getConnection();
+      obj.invoke(_setConnectionSymbol, [mySQLConnection]);
+      _usedCollection[type]!.add(obj.reflectee);
+      _usedNumbers[obj.reflectee.hashCode] = 1;
+      return obj.reflectee;
+    } else if(_usedCollection[type]!.isNotEmpty && reuse) {
       //寻找_usedConnection中使用次数最少的mapping
       int min = 100000000;
       int n = 0;
@@ -77,56 +100,59 @@ class AlkaidOrmManager {
       }
       _usedNumbers[_usedCollection[type]![n].hashCode] = min+1;
       return _usedCollection[type]![n];
-    } else if(_collection[type]!.isNotEmpty) {
-      var obj = _collection[type]!.removeAt(0);
-      MySQLConnection mySQLConnection = await pool.getConnection();
-      await (reflect(obj).invoke(_setConnectionSymbol, [mySQLConnection]).reflectee);
-      _usedCollection[type]!.add(obj);
-      _usedNumbers[obj.hashCode] = 1;
-      return obj;
-    } else if(maxMappingCapacity <= 0 || _collection[type]!.length < maxMappingCapacity) {
-      var obj = _types[type]!.newInstance(Symbol(''), []);
-       await obj.invoke(_setConnectionSymbol, [await pool.getConnection()]).reflectee;
-      _usedCollection[type]!.add(obj.reflectee);
-      _usedNumbers[obj.reflectee.hashCode] = 1;
-      return obj.reflectee;
     } else {
-      //加入等待队列?
-      print(red.wrap('error'));
+      //加入等待队列
+      Completer completer = Completer();
+      _waitQueue.addLast((completer,type,reuse));
+      return completer.future;
     }
   }
 
   FutureOr<dynamic> getSingleInstance(Type type) async {
       var obj = _types[type]!.newInstance(Symbol(''), []);
-       await obj.invoke(_setConnectionSymbol, [await pool.getConnection()]).reflectee;
       _isSingle[obj.hashCode] = true;
+      await obj.invoke(_setConnectionSymbol, [await pool.getConnection()]).reflectee;
       return obj.reflectee;
   }
 
   ///回收Mapping
   ///不会立即将连接归还给连接池，只有当长时间没有使用才会归还连接
   Future<void> dispose(dynamic object,{cache = false}) async {
-    if(_isSingle[object.hashCode] != null && _isSingle[object.hashCode]!) {
-
+    if(_isSingle[object.hashCode] != null) {
       if(cache) {
         //获取mapping的使用次数
         ClassMirror classMirror = reflect(object).type;
-        late Type type;
+        Type? type;
         for(var key in types.keys) {
           if(types[key] == classMirror) {
             type = key;
             break;
           }
         }
+        if(type == null) {
+          throw AlkaidServerException('$object 类型错误!');
+        }
         _usedCollection[type]!.add(object);
+        _usedNumbers[object.hashCode] = 0;
+        if(_waitQueue.isNotEmpty) {
+          for(int i = 0 ; i < _waitQueue.length ; i++) {
+            if(_waitQueue.elementAt(i).$2 == type) {
+              var member = _waitQueue.elementAt(i);
+              _waitQueue.remove(member);
+              _usedNumbers[object.hashCode] = 1;
+              member.$1.complete(object);
+              break;
+            }
+          }
+        }
         return ;
       } else {
+        _isSingle.remove(object.hashCode);
         //归还连接
-        MySQLConnection mySQLConnection = await reflect(object)
+        MySQLConnection mySQLConnection =  reflect(object)
             .invoke(_cleanConnectionSymbol, [])
             .reflectee;
         pool.dispose(mySQLConnection);
-        _isSingle.remove(object.hashCode);
         object = null;
         return;
       }
@@ -135,14 +161,43 @@ class AlkaidOrmManager {
     //获取mapping的使用次数
     InstanceMirror instanceMirror = reflect(object);
     ClassMirror classMirror = instanceMirror.type;
-    late Type type;
+    Type? type;
     for(var key in types.keys) {
       if(types[key] == classMirror) {
         type = key;
         break;
       }
     }
+
+    if(type == null) {
+      throw AlkaidServerException('$object 类型错误!');
+    }
+
     if(cache) {
+      _usedNumbers[object.hashCode] = _usedNumbers[object.hashCode]! - 1;
+      if(_waitQueue.isNotEmpty) {
+        for(int i = 0 ; i < _waitQueue.length ; i++) {
+          if(_waitQueue.elementAt(i).$2 == type) {
+            var member = _waitQueue.elementAt(i);
+            if(member.$3 == true) {
+              _waitQueue.remove(member);
+              _usedNumbers[object.hashCode] =
+                  _usedNumbers[object.hashCode]! + 1;
+              member.$1.complete(object);
+              break;
+            } else {
+              if(_usedNumbers[object.hashCode] == 0) {
+                _waitQueue.remove(member);
+                _usedNumbers[object.hashCode] = 1;
+                member.$1.complete(object);
+                break;
+              } else {
+                continue;
+              }
+            }
+          }
+        }
+      }
       return ;
     }
     for(int i = 0 ; i < _usedCollection[type]!.length ; i++) {
@@ -151,20 +206,44 @@ class AlkaidOrmManager {
         int n = _usedNumbers[object.hashCode]!;
         --n;
         if(n == 0) {
+          //等待队列非空，则直接将mapping给等待的线程
+          if(_waitQueue.isNotEmpty) {
+            for(int i = 0 ; i < _waitQueue.length ; i++) {
+              if(_waitQueue.elementAt(i).$2 == type) {
+                var member = _waitQueue.elementAt(i);
+                _waitQueue.remove(member);
+                _usedNumbers[object.hashCode] = 1;
+                member.$1.complete(object);
+                return ;
+              }
+            }
+          }
           //将资源归还池
-          MySQLConnection mySQLConnection = await instanceMirror.invoke(_cleanConnectionSymbol, []).reflectee;
-          pool.dispose(mySQLConnection);
           _usedNumbers.remove(object.hashCode);
           _usedCollection[type]!.removeAt(i);
+          _identityCapacity[type]  = _identityCapacity[type]! - 1;
           _collection[type]!.add(object);
+          MySQLConnection mySQLConnection = instanceMirror.invoke(_cleanConnectionSymbol, []).reflectee;
+          pool.dispose(mySQLConnection);
           object = null;
           break;
         } else {
-          break;
+          _usedNumbers[object.hashCode] = n;
+          for(int i = 0 ; i < _waitQueue.length ; i++) {
+            if(_waitQueue.elementAt(i).$2 == type && _waitQueue.elementAt(i).$3 == true) {
+              var member = _waitQueue.elementAt(i);
+              _waitQueue.remove(member);
+              _usedNumbers[object.hashCode] = n +1;
+              member.$1.complete(object);
+              break;
+            }
+          }
         }
+        break;
       }
     }
   }
+
 
   //抽象类的实现类需要以抽象类的名字startWith
   void _inject() async {
@@ -274,6 +353,22 @@ class AlkaidOrmManager {
   }
 
   void close() {
+    //需要等待所有任务完成
+    //监听_userNumber的状态
+    // Timer.periodic(Duration(seconds: 1), (timer) {
+    //   if(_usedNumbers.isEmpty) {
+    //
+    //   } else if(timer.tick >=  60) {
+    //     //强制关闭
+    //     _usedCollection.forEach((key, value) {
+    //       _collection[key].add(value);
+    //     });
+    //     _usedCollection.clear();
+    //     _collection.clear();
+    //
+    //   }
+    // });
+
     _pool.close();
     _usedCollection.clear();
     _timer.cancel();
@@ -281,6 +376,7 @@ class AlkaidOrmManager {
     _collection.clear();
     _types.clear();
     _isSingle.clear();
+
   }
 }
 
